@@ -1,0 +1,11 @@
+prometheus-data/*
+!prometheus-data/.gitkeep
+
+thanos-compact/*
+!thanos-compact/.gitkeep
+
+thanos-data/*
+!thanos-data/.gitkeep
+
+thanos-store/*
+!thanos-store/.gitkeep

@@ -1,0 +1,105 @@
+version: '3.6'
+
+networks:
+  prometheus:
+    driver: bridge
+    name: prometheus
+
+services:
+  prometheus:
+    image: prom/prometheus
+    restart: unless-stopped
+    volumes:
+      - ./prometheus-data:/prometheus
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./prometheus.rules.yml:/etc/prometheus/prometheus.rules.yml
+    command: |
+      --storage.tsdb.max-block-duration=1h
+      --storage.tsdb.min-block-duration=1h
+      --config.file=/etc/prometheus/prometheus.yml
+      --storage.tsdb.retention.time=3h
+    ports:
+      - 9090:9090
+    user: 1000:1000
+    networks:
+      prometheus:
+
+  thanos_sidecar:
+    image: thanosio/thanos:master-2020-05-18-960563ce
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    command: |
+      sidecar
+      --prometheus.url=http://prometheus:9090
+      --tsdb.path=/prometheus/data
+      --objstore.config-file=/thanos/bucket_config.yml
+      --grpc-address=0.0.0.0:10901
+    ports:
+      - 10901:10901
+    volumes:
+      - ./bucket_config.yml:/thanos/bucket_config.yml
+      - ./prometheus-data:/prometheus
+      - ./thanos-data:/thanos/data
+    user: 1000:1000
+    networks:
+      prometheus:
+
+  thanos_gateway:
+    image: thanosio/thanos:master-2020-05-18-960563ce
+    depends_on:
+      - thanos_sidecar
+    restart: unless-stopped
+    command: |
+      store
+      --objstore.config-file=/thanos/bucket_config.yml
+      --data-dir=/thanos/store
+      --http-address=0.0.0.0:10906
+      --grpc-address=0.0.0.0:10905
+    ports:
+      - 10906:10906
+      - 10905:10905
+    volumes:
+        - ./bucket_config.yml:/thanos/bucket_config.yml
+        - ./thanos-store:/thanos/store
+        - ./thanos-data:/thanos/data
+    user: 1000:1000
+    networks:
+      prometheus:
+
+  thanos_querier:
+    image: thanosio/thanos:master-2020-05-18-960563ce
+    depends_on:
+      - thanos_sidecar
+    restart: unless-stopped
+    command: |
+      query
+      --http-address 0.0.0.0:19191
+      --store thanos_gateway:10905
+      --store thanos_sidecar:10901
+    ports:
+      - 19191:19191
+    user: 1000:1000
+    networks:
+      prometheus:
+
+  thanos_compactor:
+    image: thanosio/thanos:master-2020-05-18-960563ce
+    depends_on:
+      - thanos_sidecar
+    restart: unless-stopped
+    command: |
+      compact
+      --objstore.config-file=/thanos/bucket_config.yml
+      --retention.resolution-raw=1d
+      --retention.resolution-5m=2w
+      --retention.resolution-1h=0d
+      --wait
+      --data-dir /thanos/compact
+    user: 1000:1000
+    volumes:
+      - ./bucket_config.yml:/thanos/bucket_config.yml
+      - ./thanos-compact:/thanos/compact
+      - ./thanos-data:/thanos/data
+    networks:
+      prometheus:
